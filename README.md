@@ -12,14 +12,30 @@ research-trading --ticker BTC-USD --start-date 2023-01-01 --end-date 2024-01-01 
 The system handles everything else autonomously:
 
 ```
-[INITIALIZED] Fetching BTC-USD 1h data...
-[TRAINING]    Attempt 1/3 — XGBoost (catalog base)
-[VALIDATING]  Walk-forward 5 folds → MAPE: 0.38
-[LEADER]      Diagnosis: PARAMETER_ISSUE → TUNE
-[IMPROVING]   Optuna 50 trials → best params found
-[TRAINING]    Attempt 2/3 — XGBoost (tuned)
-[VALIDATING]  Walk-forward 5 folds → MAPE: 0.27
-[SUCCESS]     threshold=0.30 reached → model saved
+============================================================
+  Multi-Agent Financial Forecasting Optimizer
+============================================================
+  Ticker   : BTC-USD
+  Timeframe: 1h
+  Target   : mape <= 0.30
+============================================================
+
+  Running optimization loop ...
+
+  leader        → TUNE (no validation report yet, start training)
+  validation   [xgboost] | metric=0.4200 → TUNE (PARAMETER_ISSUE, confidence=0.75)
+  leader        → TUNE (running Optuna tuning)
+  validation   [xgboost] | metric=0.3500 → TUNE (PARAMETER_ISSUE, confidence=0.70)
+  leader        → RESEARCH (inner loop exhausted after 3 attempts)
+  research      → TUNE (new methodology: lightgbm)
+  codegen      [lightgbm]
+  validation   [lightgbm] | metric=0.2700 → SUCCESS
+  leader        → SUCCESS
+
+────────────────────────────────────────────────────────────
+  SUCCESS
+  mape = 0.2700  (threshold: 0.30)
+────────────────────────────────────────────────────────────
 ```
 
 ## Architecture
@@ -29,19 +45,31 @@ The system handles everything else autonomously:
 | Agent | Role |
 |---|---|
 | **Leader** | Receives diagnostics, decides next action, owns state transitions |
-| **Research** | Finds new methodologies via web search (activated after 3 failed attempts) |
-| **Code Generation** | Translates methodologies → Python skills |
-| **Validation** | Runs walk-forward experiments, diagnoses root cause |
+| **Validation** | Runs walk-forward experiments, diagnoses root cause — never decides |
+| **Research** | Finds new methodologies via web search (activates after 3 failed attempts) |
+| **Code Generation** | Translates methodology → executable Python skill |
 
 ### Two-Level Optimization Loop
 
 ```
-OUTER LOOP: per methodology
-  INNER LOOP: max 3 attempts
+OUTER LOOP: per methodology (Research Agent provides new ones)
+  INNER LOOP: max 3 attempts per methodology
     validate → DiagnosticReport (PARAMETER / ARCHITECTURE / METHODOLOGY issue)
-    Leader decides: tune / new variant / new methodology / success / failed
-  if attempts exhausted → Research Agent finds new methodology
+    Leader decides: TUNE / NEW_VARIANT / RESEARCH / SUCCESS / FAILED
+  if 3 attempts exhausted → Research Agent finds next methodology
+if metric <= threshold → SUCCESS
+if outer iterations >= max → FAILED
 ```
+
+First outer iteration always uses the built-in catalog: **XGBoost → LightGBM → LSTM** — no Research Agent needed.
+
+## Requirements
+
+Only one external API key is required:
+
+- `DEEPSEEK_API_KEY` — get one at [platform.deepseek.com](https://platform.deepseek.com)
+
+Web research uses **DuckDuckGo** (free, no API key).
 
 ## Installation
 
@@ -55,12 +83,15 @@ pip install -e .
 
 ```bash
 cp .env.example .env
-# Edit .env and add your API keys
 ```
 
-Required keys:
-- `DEEPSEEK_API_KEY` — [platform.deepseek.com](https://platform.deepseek.com)
-- `TAVILY_API_KEY` — [tavily.com](https://tavily.com) (web search for Research Agent)
+Edit `.env` and set your DeepSeek key:
+
+```
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
+```
+
+That's it — no other keys required.
 
 ## Usage
 
@@ -75,20 +106,21 @@ research-trading \
   --threshold 0.30
 ```
 
-| Parameter | Description | Example |
+| Parameter | Description | Default |
 |---|---|---|
-| `--ticker` | Asset ticker (yfinance format) | `BTC-USD`, `AAPL`, `ETH-USD` |
-| `--start-date` | Data window start | `2023-01-01` |
-| `--end-date` | Data window end | `2024-01-01` |
-| `--timeframe` | Candle interval | `1h`, `1d`, `15m` |
-| `--train-pct` | Training data percentage (0–1) | `0.80` |
+| `--ticker` | Asset ticker (yfinance format): `BTC-USD`, `AAPL`, `ETH-USD` | required |
+| `--start-date` | Data window start `YYYY-MM-DD` | required |
+| `--end-date` | Data window end `YYYY-MM-DD` | required |
+| `--timeframe` | Candle interval: `1h`, `1d`, `15m`, `30m` | `1d` |
+| `--train-pct` | Training data fraction (0–1) | `0.80` |
 | `--n-folds` | Walk-forward validation folds | `5` |
-| `--threshold` | Target MAPE threshold | `0.30` |
+| `--threshold` | Target metric threshold to declare success | `0.30` |
+| `--metric` | Metric to optimize: `mape`, `rmse`, `mae`, `r2`, ... | `mape` |
 
-## View Experiments
+## View Experiments (MLflow)
 
 ```bash
-mlflow ui
+mlflow ui --backend-store-uri ./experiments/mlruns
 # Open http://localhost:5000
 ```
 
@@ -101,16 +133,16 @@ mlflow ui
 registry.register("my_metric", my_metric_fn, is_lower_better=True)
 ```
 
-### Add a new skill
+### Add a new skill manually
 
 ```python
-# agent_skills/my_skill.py
-class MySkill(BaseSkill):
-    name = "my_skill"
+# agent_skills/my_model_skill.py
+class MyModelSkill(BaseSkill):
+    name = "my_model"
     ...
 ```
 
-The SkillRegistry auto-discovers it on next run.
+The `SkillRegistry` auto-discovers it on next run — no registration needed.
 
 ### Add a new agent
 
@@ -121,13 +153,22 @@ class MyAgent(BaseAgent):
     async def run(self, state: WorkflowState) -> WorkflowState: ...
 ```
 
+## Optional services
+
+| Service | Use | Required |
+|---|---|---|
+| Redis | Distributed state backend | No (in-memory by default) |
+| MLflow | Experiment tracking UI | No (logs locally) |
+| ChromaDB | Research memory (avoid re-researching) | No (lazy-loaded) |
+
 ## Stack
 
 - **Orchestration:** LangGraph + LangChain
-- **LLM:** DeepSeek API
+- **LLM:** DeepSeek API (`deepseek-chat`)
+- **Web search:** DuckDuckGo (no key)
 - **Data:** yfinance
 - **ML:** XGBoost · LightGBM · PyTorch · scikit-learn
 - **Tuning:** Optuna
 - **Tracking:** MLflow
-- **Memory:** ChromaDB
+- **Memory:** ChromaDB (vector) + in-memory / Redis (state)
 - **Config:** Pydantic v2 + YAML

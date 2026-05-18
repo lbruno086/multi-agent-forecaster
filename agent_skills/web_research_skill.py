@@ -5,7 +5,6 @@ from typing import Any
 import numpy as np
 
 from agent_skills.base_skill import BaseSkill, SkillResult
-from configs.settings import settings
 from tools.logger import get_logger
 
 log = get_logger(__name__)
@@ -13,14 +12,13 @@ log = get_logger(__name__)
 
 class WebResearchSkill(BaseSkill):
     name = "web_research"
-    description = "Searches the web via Tavily API for financial forecasting methodologies."
+    description = "Searches the web via DuckDuckGo (no API key required)."
 
     def execute(self, params: dict[str, Any]) -> SkillResult:
         query: str = params["query"]
         max_results: int = params.get("max_results", 5)
-        search_depth: str = params.get("search_depth", "advanced")
 
-        results = self._search(query, max_results, search_depth)
+        results = self._search(query, max_results)
 
         return SkillResult(
             skill_name=self.name,
@@ -32,29 +30,22 @@ class WebResearchSkill(BaseSkill):
             metadata={"results": results, "query": query},
         )
 
-    def _search(self, query: str, max_results: int, search_depth: str) -> list[dict]:
-        if not settings.tavily_api_key:
-            log.warning("tavily_key_missing", msg="Returning empty results")
-            return []
+    def _search(self, query: str, max_results: int) -> list[dict]:
         try:
-            from tavily import TavilyClient
-            client = TavilyClient(api_key=settings.tavily_api_key)
-            response = client.search(
-                query=query,
-                max_results=max_results,
-                search_depth=search_depth,
-            )
+            from duckduckgo_search import DDGS
+            with DDGS() as ddgs:
+                raw = ddgs.text(query, max_results=max_results)
             return [
                 {
                     "title": r.get("title", ""),
-                    "url": r.get("url", ""),
-                    "content": r.get("content", ""),
-                    "score": r.get("score", 0.0),
+                    "url": r.get("href", ""),
+                    "content": r.get("body", ""),
+                    "score": 1.0,
                 }
-                for r in response.get("results", [])
+                for r in (raw or [])
             ]
         except Exception as exc:
-            log.error("tavily_search_failed", error=str(exc))
+            log.warning("web_search_failed", error=str(exc))
             return []
 
     def get_schema(self) -> dict[str, Any]:
@@ -62,6 +53,5 @@ class WebResearchSkill(BaseSkill):
             "params": {
                 "query": "str — search query",
                 "max_results": "int (default 5)",
-                "search_depth": "str 'basic' | 'advanced' (default 'advanced')",
             }
         }

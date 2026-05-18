@@ -67,7 +67,6 @@ class Settings(BaseSettings):
     deepseek_base_url: str = Field(
         default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL"
     )
-    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     mlflow_tracking_uri: str = Field(default="", alias="MLFLOW_TRACKING_URI")
     redis_url: str = Field(default="", alias="REDIS_URL")
 

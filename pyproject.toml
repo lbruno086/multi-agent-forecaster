@@ -41,7 +41,7 @@ dependencies = [
     "fastapi>=0.111",
     "uvicorn>=0.30",
     "python-dotenv>=1.0",
-    "tavily-python>=0.3",
+    "duckduckgo-search>=6.0",
     "statsmodels>=0.14",
 ]
 
