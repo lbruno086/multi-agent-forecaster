@@ -1,0 +1,28 @@
+system:
+  max_inner_attempts: 3
+  max_outer_iterations: 5
+  state_backend: memory  # "memory" or "redis"
+  log_level: INFO
+
+llm:
+  provider: deepseek
+  model: deepseek-chat
+  temperature: 0.1
+  max_tokens: 8192
+
+data:
+  source: yfinance
+  cache_dir: ./datasets/cache
+
+mlflow:
+  tracking_uri: ./experiments/mlruns
+  experiment_name: multi-agent-forecaster
+
+optuna:
+  n_trials: 50
+  direction: minimize
+
+redis:
+  host: localhost
+  port: 6379
+  db: 0
